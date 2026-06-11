@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XIAO IMU Visualiser</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0a0a0f;
+    color: #e0e0e0;
+    font-family: 'Courier New', monospace;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 20px;
+  }
+
+  h1 {
+    font-size: 14px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: #4af;
+    margin-bottom: 6px;
+    margin-top: 10px;
+  }
+
+  .subtitle {
+    font-size: 11px;
+    color: #556;
+    letter-spacing: 2px;
+    margin-bottom: 24px;
+  }
+
+  #connectBtn {
+    background: none;
+    border: 1px solid #4af;
+    color: #4af;
+    padding: 10px 28px;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    letter-spacing: 2px;
+    cursor: pointer;
+    text-transform: uppercase;
+    transition: all 0.2s;
+    margin-bottom: 24px;
+  }
+
+  #connectBtn:hover { background: #4af; color: #0a0a0f; }
+  #connectBtn:disabled { border-color: #334; color: #334; cursor: default; background: none; }
+
+  #status {
+    font-size: 11px;
+    letter-spacing: 1px;
+    color: #556;
+    margin-bottom: 20px;
+    min-height: 16px;
+  }
+
+  #status.connected { color: #4f8; }
+  #status.error { color: #f64; }
+
+  canvas {
+    display: block;
+    margin: 0 auto 24px;
+  }
+
+  .data-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    width: 100%;
+    max-width: 360px;
+  }
+
+  .data-card {
+    background: #111118;
+    border: 1px solid #1e1e2e;
+    padding: 12px;
+    border-radius: 4px;
+  }
+
+  .data-card h3 {
+    font-size: 10px;
+    letter-spacing: 3px;
+    color: #4af;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+  }
+
+  .data-card .val {
+    font-size: 12px;
+    color: #aac;
+    line-height: 1.8;
+  }
+
+  .data-card .val span {
+    color: #e0e0e0;
+    font-size: 13px;
+  }
+
+  .axis-x { color: #f64 !important; }
+  .axis-y { color: #4f8 !important; }
+  .axis-z { color: #4af !important; }
+</style>
+</head>
+<body>
+
+<h1>IMU Visualiser</h1>
+<div class="subtitle">XIAO nRF52840 + MPU-6050</div>
+
+<button id="connectBtn" onclick="connect()">Connect via BLE</button>
+<div id="status">Waiting for connection...</div>
+
+<canvas id="c" width="300" height="300"></canvas>
+
+<div class="data-grid">
+  <div class="data-card">
+    <h3>Accel (g)</h3>
+    <div class="val">
+      X <span class="axis-x" id="ax">0.00</span><br>
+      Y <span class="axis-y" id="ay">0.00</span><br>
+      Z <span class="axis-z" id="az">0.00</span>
+    </div>
+  </div>
+  <div class="data-card">
+    <h3>Gyro (deg/s)</h3>
+    <div class="val">
+      X <span class="axis-x" id="gx">0.00</span><br>
+      Y <span class="axis-y" id="gy">0.00</span><br>
+      Z <span class="axis-z" id="gz">0.00</span>
+    </div>
+  </div>
+</div>
+
+<script>
+const SERVICE_UUID  = "19b10000-e8f2-537e-4f6c-d104768a1214";
+const CHAR_UUID     = "19b10001-e8f2-537e-4f6c-d104768a1214";
+
+let roll = 0, pitch = 0, yaw = 0;
+let targetRoll = 0, targetPitch = 0, targetYaw = 0;
+
+// --- BLE ---
+async function connect() {
+  const btn = document.getElementById('connectBtn');
+  const status = document.getElementById('status');
+  try {
+    btn.disabled = true;
+    status.textContent = 'Scanning...';
+    status.className = '';
+
+    const device = await navigator.bluetooth.requestDevice({
+      acceptAllDevices: true,
+      optionalServices: [SERVICE_UUID]
+    });
+
+    status.textContent = 'Connecting...';
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService(SERVICE_UUID);
+    const char = await service.getCharacteristic(CHAR_UUID);
+
+    await char.startNotifications();
+    char.addEventListener('characteristicvaluechanged', onData);
+
+    status.textContent = 'Connected — ' + device.name;
+    status.className = 'connected';
+    btn.textContent = 'Connected';
+
+    device.addEventListener('gattserverdisconnected', () => {
+      status.textContent = 'Disconnected';
+      status.className = 'error';
+      btn.disabled = false;
+      btn.textContent = 'Reconnect';
+    });
+
+  } catch(e) {
+    status.textContent = 'Error: ' + e.message;
+    status.className = 'error';
+    btn.disabled = false;
+  }
+}
+
+function onData(e) {
+  const buf = e.target.value.buffer;
+  const view = new DataView(buf);
+  const ax = view.getFloat32(0, true);
+  const ay = view.getFloat32(4, true);
+  const az = view.getFloat32(8, true);
+  const gx = view.getFloat32(12, true);
+  const gy = view.getFloat32(16, true);
+  const gz = view.getFloat32(20, true);
+
+  document.getElementById('ax').textContent = ax.toFixed(2);
+  document.getElementById('ay').textContent = ay.toFixed(2);
+  document.getElementById('az').textContent = az.toFixed(2);
+  document.getElementById('gx').textContent = gx.toFixed(2);
+  document.getElementById('gy').textContent = gy.toFixed(2);
+  document.getElementById('gz').textContent = gz.toFixed(2);
+
+  // Compute roll/pitch from accel
+  targetRoll  = Math.atan2(ay, az);
+  targetPitch = Math.atan2(-ax, Math.sqrt(ay*ay + az*az));
+}
+
+// --- 3D box renderer ---
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+const cx = W/2, cy = H/2;
+
+function project(x, y, z, fov=320) {
+  const scale = fov / (fov + z);
+  return { x: cx + x * scale, y: cy - y * scale, s: scale };
+}
+
+function rotateX(v, a) {
+  return { x: v.x, y: v.y*Math.cos(a) - v.z*Math.sin(a), z: v.y*Math.sin(a) + v.z*Math.cos(a) };
+}
+function rotateY(v, a) {
+  return { x: v.x*Math.cos(a) + v.z*Math.sin(a), y: v.y, z: -v.x*Math.sin(a) + v.z*Math.cos(a) };
+}
+function rotateZ(v, a) {
+  return { x: v.x*Math.cos(a) - v.y*Math.sin(a), y: v.x*Math.sin(a) + v.y*Math.cos(a), z: v.z };
+}
+
+// Box vertices (w=120, h=40, d=80 — sensor-like proportions)
+const W2=60, H2=20, D2=40;
+const verts = [
+  {x:-W2,y:-H2,z:-D2},{x:W2,y:-H2,z:-D2},{x:W2,y:H2,z:-D2},{x:-W2,y:H2,z:-D2},
+  {x:-W2,y:-H2,z: D2},{x:W2,y:-H2,z: D2},{x:W2,y:H2,z: D2},{x:-W2,y:H2,z: D2}
+];
+
+const faces = [
+  { idx:[0,1,2,3], color:'#1a3a5c', label:'FRONT' },
+  { idx:[4,5,6,7], color:'#1a3a5c', label:'BACK' },
+  { idx:[0,4,7,3], color:'#0e2a44', label:'LEFT' },
+  { idx:[1,5,6,2], color:'#0e2a44', label:'RIGHT' },
+  { idx:[0,1,5,4], color:'#4af',    label:'TOP' },
+  { idx:[3,2,6,7], color:'#123',    label:'BTM' },
+];
+
+function drawFace(pts, color, label, alpha) {
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x, pts[i].y);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.globalAlpha = alpha;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = '#4af';
+  ctx.lineWidth = 0.8;
+  ctx.stroke();
+}
+
+function drawAxes(rotated) {
+  const origin = project(0,0,0);
+  const axes = [
+    { v: {x:80,y:0,z:0}, color:'#f64', label:'X' },
+    { v: {x:0,y:80,z:0}, color:'#4f8', label:'Y' },
+    { v: {x:0,y:0,z:80}, color:'#4af', label:'Z' },
+  ];
+  axes.forEach(a => {
+    let v = rotateX(a.v, roll);
+    v = rotateY(v, pitch);
+    v = rotateZ(v, yaw);
+    const end = project(v.x, v.y, v.z);
+    ctx.beginPath();
+    ctx.moveTo(origin.x, origin.y);
+    ctx.lineTo(end.x, end.y);
+    ctx.strokeStyle = a.color;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = a.color;
+    ctx.font = '11px Courier New';
+    ctx.fillText(a.label, end.x+4, end.y-4);
+  });
+}
+
+function draw() {
+  // Smooth interpolation
+  roll  += (targetRoll  - roll)  * 0.15;
+  pitch += (targetPitch - pitch) * 0.15;
+
+  ctx.clearRect(0, 0, W, H);
+
+  // Background grid
+  ctx.strokeStyle = '#1a1a2e';
+  ctx.lineWidth = 0.5;
+  for(let i=0;i<W;i+=30) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,H); ctx.stroke(); }
+  for(let i=0;i<H;i+=30) { ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(W,i); ctx.stroke(); }
+
+  // Transform verts
+  const tv = verts.map(v => {
+    let r = rotateX(v, roll);
+    r = rotateY(r, pitch);
+    r = rotateZ(r, yaw);
+    return r;
+  });
+
+  // Sort faces by avg z (painter's algo)
+  const sorted = faces.map(f => {
+    const avgZ = f.idx.reduce((s,i) => s + tv[i].z, 0) / f.idx.length;
+    return { ...f, avgZ };
+  }).sort((a,b) => a.avgZ - b.avgZ);
+
+  sorted.forEach(f => {
+    const pts = f.idx.map(i => project(tv[i].x, tv[i].y, tv[i].z));
+    // Normal for lighting
+    const v0 = tv[f.idx[0]], v1 = tv[f.idx[1]], v2 = tv[f.idx[2]];
+    const nx = (v1.y-v0.y)*(v2.z-v0.z)-(v1.z-v0.z)*(v2.y-v0.y);
+    const ny = (v1.z-v0.z)*(v2.x-v0.x)-(v1.x-v0.x)*(v2.z-v0.z);
+    const nz = (v1.x-v0.x)*(v2.y-v0.y)-(v1.y-v0.y)*(v2.x-v0.x);
+    const light = Math.max(0.3, (nx*0.3+ny*0.5+nz*0.8)/Math.sqrt(nx*nx+ny*ny+nz*nz+0.001));
+    drawFace(pts, f.color, f.label, 0.7 + light*0.3);
+  });
+
+  drawAxes();
+  requestAnimationFrame(draw);
+}
+
+draw();
+</script>
+</body>
+</html>
