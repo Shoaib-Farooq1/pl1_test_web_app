@@ -155,6 +155,7 @@ async function connect() {
     const device = await navigator.bluetooth.requestDevice({
       acceptAllDevices: true,
       optionalServices: [SERVICE_UUID]
+      optionalServices: [SERVICE_UUID]
     });
 
     status.textContent = 'Connecting...';
